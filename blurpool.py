@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class BlurPool2D(nn.Module):
-    def __init__(self, channels, pad_type='reflect', filt_size=4, stride=1, pad_off=0):
+    def __init__(self, channels:int, pad_type:str='reflect', filt_size:int=4, stride:int=1, pad_off:int=0):
         super(BlurPool2D, self).__init__()
         self.filt_size = filt_size
         self.pad_off = pad_off
@@ -36,16 +36,16 @@ class BlurPool2D(nn.Module):
 
         self.pad = self.get_pad_layer(pad_type)(self.pad_sizes)
 
-    def forward(self, inp):
+    def forward(self, input:torch.Tensor):
         if(self.filt_size==1):
             if(self.pad_off==0):
-                return inp[:,:,::self.stride,::self.stride]    
+                return input[:,:,::self.stride,::self.stride]    
             else:
-                return self.pad(inp)[:,:,::self.stride,::self.stride]
+                return self.pad(input)[:,:,::self.stride,::self.stride]
         else:
-            return F.conv2d(self.pad(inp), self.filt, stride=self.stride, groups=inp.shape[1])
+            return F.conv2d(self.pad(input), self.filt, stride=self.stride, groups=input.shape[1])
 
-    def get_pad_layer(self, pad_type):
+    def get_pad_layer(self, pad_type:str):
         if(pad_type in ['refl','reflect']):
             PadLayer = nn.ReflectionPad2d
         elif(pad_type in ['repl','replicate']):
@@ -57,7 +57,7 @@ class BlurPool2D(nn.Module):
         return PadLayer
 
 class BlurPool1D(nn.Module):
-    def __init__(self, channels, pad_type='reflect', filt_size=3, stride=1, pad_off=0):
+    def __init__(self, channels:int, pad_type:str='reflect', filt_size:int=3, stride:int=1, pad_off:int=0):
         super(BlurPool1D, self).__init__()
         self.filt_size = filt_size
         self.pad_off = pad_off
@@ -89,16 +89,16 @@ class BlurPool1D(nn.Module):
 
         self.pad = self.get_pad_layer_1d(pad_type)(self.pad_sizes)
 
-    def forward(self, inp):
+    def forward(self, input):
         if(self.filt_size == 1):
             if(self.pad_off == 0):
-                return inp[:, :, ::self.stride]
+                return input[:, :, ::self.stride]
             else:
-                return self.pad(inp)[:, :, ::self.stride]
+                return self.pad(input)[:, :, ::self.stride]
         else:
-            return F.conv1d(self.pad(inp), self.filt, stride=self.stride, groups=inp.shape[1])
+            return F.conv1d(self.pad(input), self.filt, stride=self.stride, groups=input.shape[1])
 
-    def get_pad_layer_1d(self, pad_type):
+    def get_pad_layer_1d(self, pad_type:str):
         if(pad_type in ['refl', 'reflect']):
             PadLayer = nn.ReflectionPad1d
         elif(pad_type in ['repl', 'replicate']):
