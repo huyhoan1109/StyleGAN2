@@ -15,7 +15,7 @@ def PathLengthRegulator(faked_image, latent, mean_path, w_decay):
         allow_unused=True, 
         create_graph=True)[0]
     if gradient == None:
-        gradient = torch.randn(faked_image.shape)
+        gradient = torch.randn(mean_path.shape)
     # Calculate penalty
     penalty = (((gradient - mean_path) ** 2).sum()).sqrt()
 
