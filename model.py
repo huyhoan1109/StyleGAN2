@@ -1,5 +1,4 @@
 import math
-from xml.dom.expatbuilder import parseString
 import config
 import numpy as np
 from typing import Optional, Tuple
@@ -7,6 +6,7 @@ from typing import Optional, Tuple
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.autograd import grad, Variable
 from blurpool import BlurPool2D
 
 def Equalized(*shape:int, pre_bias:float=0.0, gain:float=1, lrm:float=1):
@@ -174,12 +174,3 @@ class Discriminator(nn.Module):
         super().__init__()
     def forward(self):
         pass
-
-def test():
-    DS = UpSample(3, 2)
-    a = torch.rand(5, 3, 64, 64)
-    s = torch.rand(5, 3)
-    print(DS(a).shape)
-
-if __name__ == '__main__':
-    test()
