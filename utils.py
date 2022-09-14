@@ -2,7 +2,8 @@ import math
 from torch.autograd import grad, Variable
 import torch
 
-def PathLengthRegulator(
+def PLRegulator(
+    # Path length Regulator
     faked_image:torch.Tensor, 
     latent:torch.Tensor, 
     mean_path:float, 
