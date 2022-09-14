@@ -1,4 +1,5 @@
 import math
+from xml.dom.expatbuilder import parseString
 import config
 import numpy as np
 from typing import Optional, Tuple
@@ -126,24 +127,26 @@ class toRGB(nn.Module):
         return F.leaky_relu(res, negative_slope=0.2)
 
 class DownSample(nn.Module):
-    def __init__(self, channels:int, scale_factor:int=2):
+    def __init__(self, channels:int, scaler:int=2):
         super().__init__()
-        self.blur = BlurPool2D(channels, stride=1)
-        self.scale = scale_factor
+        self.blur = BlurPool2D(channels)
+        self.scaler = scaler
     def forward(self, input:torch.Tensor):
         res = self.blur(input)
-        print(res.shape)
-        return F.interpolate(res, scale_factor=1/self.scale, mode='bilinear', align_corners=False, recompute_scale_factor=True)
+        res = F.interpolate(res, scale_factor=1/self.scaler, align_corners='bilinear', recompute_scale_factor=True)
+        return res
 
 class UpSample(nn.Module):
-    def __init__(self, channels:int, scale_factor:int=2):
+    def __init__(self, channels:int, scaler:int=2):
         super().__init__()
         self.blur = BlurPool2D(channels, stride=1)
-        self.upsample = nn.Upsample(scale_factor=scale_factor)
+        self.up_sample = nn.Upsample(scaler_factor=scaler)
     def forward(self, input:torch.Tensor):
-        return self.blur(self.upsample(input))
+        res = self.up_sample(input)
+        res = self.up_sample(res)
+        return res
 
-class GeneratorBlock(nn.Module):
+class SkipBlock(nn.Module):
     def __init__(self, w_dim:int, in_features:int, out_features:int):
         self.style_block1 = StyleBlock(w_dim, in_features, out_features)
         self.style_block2 = StyleBlock(w_dim, out_features, out_features)
@@ -157,7 +160,20 @@ class GeneratorBlock(nn.Module):
 class Generator(nn.Module):
     def __init__(self, w_dim, features):
         super().__init__()
-        # features [512, 256, ]
+    def forward(self, input, w):
+        pass
+
+class ResidualBlock(nn.Module):
+    def __init__(self, features):
+        super().__init__()
+    def forward(self, input):
+        pass 
+
+class Discriminator(nn.Module):
+    def __init__(self, features):
+        super().__init__()
+    def forward(self):
+        pass
 
 def test():
     DS = UpSample(3, 2)
