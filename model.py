@@ -1,13 +1,21 @@
 import math
+
+from matplotlib.colors import to_rgb
 import config
 import numpy as np
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.autograd import grad, Variable
 from blurpool import BlurPool2D
+
+class PixelNorm(nn.Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, input):
+        return input / torch.sqrt(torch.mean(input ** 2, dim=1, keepdim=True) + 1e-8)
 
 def Equalized(*shape:int, pre_bias:float=0.0, gain:float=1, lrm:float=1):
     if len(shape) == 4:
@@ -42,7 +50,8 @@ class EqualizedConv2d(nn.Module):
         in_channel:int, 
         out_channel:int, 
         kernel_size:int, 
-        padding:int):
+        padding:int
+    ):
         super().__init__()
         w, b = Equalized(
             in_channel, out_channel, kernel_size, kernel_size
@@ -54,6 +63,22 @@ class EqualizedConv2d(nn.Module):
     def forward(self, input:torch.Tensor):
         return F.conv2d(input, self.weight, self.bias, self.stride, self.padding)
 
+class Mapping(nn.Module):
+    def __init__(self, features:int, n_layers:int=8):
+        super().__init__()
+        layers = []
+        for _ in range(n_layers):
+            layers.append(
+                EqualizedLinear(features, features)
+            )
+            layers.append(
+                nn.LeakyReLU(0.02, inplace=True)
+            )
+        self.block = nn.Sequential(*layers)
+    def forward(self, input:torch.Tensor):
+        res = F.normalize(input, dim=1)
+        return self.block(res)
+
 class Conv2dDemodulate(nn.Module):
     def __init__(
         self, 
@@ -62,7 +87,8 @@ class Conv2dDemodulate(nn.Module):
         kernel_size:int, 
         stride:int, 
         demodulate:bool=True, 
-        eps:float=1e-8):
+        eps:float=1e-8
+    ):
         super().__init__()
         self.weight, _ = Equalized(
             in_channel, out_channel, kernel_size, kernel_size
@@ -127,9 +153,9 @@ class toRGB(nn.Module):
         return F.leaky_relu(res, negative_slope=0.2)
 
 class DownSample(nn.Module):
-    def __init__(self, channels:int, scaler:int=2):
+    def __init__(self, scaler:int=2):
         super().__init__()
-        self.blur = BlurPool2D(channels)
+        self.blur = BlurPool2D()
         self.scaler = scaler
     def forward(self, input:torch.Tensor):
         res = self.blur(input)
@@ -137,12 +163,12 @@ class DownSample(nn.Module):
         return res
 
 class UpSample(nn.Module):
-    def __init__(self, channels:int, scaler:int=2):
+    def __init__(self, scaler:int=2):
         super().__init__()
-        self.blur = BlurPool2D(channels, stride=1)
+        self.blur = BlurPool2D()
         self.up_sample = nn.Upsample(scaler_factor=scaler)
     def forward(self, input:torch.Tensor):
-        res = self.up_sample(input)
+        res = self.blur(input)
         res = self.up_sample(res)
         return res
 
@@ -151,6 +177,7 @@ class SkipBlock(nn.Module):
         self.style_block1 = StyleBlock(w_dim, in_features, out_features)
         self.style_block2 = StyleBlock(w_dim, out_features, out_features)
         self.to_rgb = toRGB(w_dim, out_features)
+    
     def forward(self, input:torch.Tensor, w:torch.Tensor, noise:Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]):
         res = self.style_block1(input, w, noise[0])
         res = self.style_block2(res, w, noise[1])
@@ -158,19 +185,67 @@ class SkipBlock(nn.Module):
         return res, rgb
 
 class Generator(nn.Module):
-    def __init__(self, w_dim, features):
+    def __init__(self, channels=config.CHANNELS, w_dim:int=config.W_DIM, z_dim:int=config.Z_DIM):
+        '''
+        channels = {
+            4: 512,
+            8: 512, 
+            16: 512,
+            32: 512,
+            64: 256 * config.CHANNEL_MULTI,
+            128: 128 * config.CHANNEL_MULTI,
+            256: 64 * config.CHANNEL_MULTI,
+            512: 32 * config.CHANNEL_MULTI,
+            1024: 16 * config.CHANNEL_MULTI 
+        }
+        '''
+        
         super().__init__()
-    def forward(self, input, w):
-        pass
+        self.initial_const = torch.rand(1, 512, 4, 4) 
+        n_layers = len(channels)
+        self.style_block = StyleBlock(w_dim, channels[4], channels[4])
+        self.toRGB = toRGB(w_dim, channels[4])
+        self.blocks = []
+        self.up_sample = UpSample()
+        for i in range(2, n_layers+1):
+            skip_block = SkipBlock(w_dim, channels[2**i], channels[2**(i+1)])
+            self.blocks.append(skip_block)
+        
+    def forward(self, w:torch.Tensor, input_noise: List[Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]]):
+        # each w will learn a style => w (n_blocks, batch_size, w_dim)
+        # so is input_noise(n_blocks, batch_size, )
+        batch_size = w.shape[1]
+        c = self.initial_const[batch_size, :, :, :]
+        res = self.style_block(c, w[0])
+        rgb = self.toRGB(res, w[0])
+        for i in range(1, len(self.block)):
+            res = self.block[i][0](res)
+            res, rgb_new = self.block[i][1](res, w[i], input_noise)
+            rgb = self.up_sample(rgb) + rgb_new
+        return rgb
 
 class ResidualBlock(nn.Module):
-    def __init__(self, features):
+    def __init__(self, in_features:int, out_features:int):
         super().__init__()
+        self.down_sample = DownSample()
+        self.conv = EqualizedConv2d(in_features, out_features, kernel_size=3, padding=1)
+        self.scale = 1 / math.sqrt(2)
     def forward(self, input):
-        pass 
+        down = self.down_sample(input)
+        conv = self.conv(input)
+        return (down + conv) * self.scale 
 
 class Discriminator(nn.Module):
-    def __init__(self, features):
+    def __init__(self, channels=config.CHANNELS):
         super().__init__()
+        self.from_rgb = nn.Sequential(
+            EqualizedConv2d(3, channels[1024], kernel_size=3, padding=1),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
+        self.blocks = []
+        n_layers = len(channels)
+        for i in range(n_layers, 1, -1):
+            block = ResidualBlock(channels[2**(i+1)], channels[2**(i)])
+            self.blocks.append(block)
     def forward(self):
         pass
